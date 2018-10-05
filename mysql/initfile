@@ -1,0 +1,4 @@
+USE mysql;
+ALTER USER 'root'@'localhost' IDENTIFIED BY 'root';
+UPDATE user SET plugin='mysql_native_password' WHERE User='root@localhost';
+FLUSH PRIVILEGES;
