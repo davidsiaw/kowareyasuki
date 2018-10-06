@@ -22,5 +22,7 @@ ADD initfile /initfile
 ADD provision.sh /provision.sh
 RUN bash /provision.sh
 
+ADD run.sh /run.sh
+
 USER mysql
-CMD ["mysqld"]
+CMD ["bash", "-e", "/run.sh"]

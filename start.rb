@@ -4,6 +4,10 @@ require "fileutils"
 num = 3
 repl_port = 33061
 image = "davidsiaw/mysqlr"
+globaldir = "global"
+
+FileUtils.mkdir_p globaldir
+File.write("#{globaldir}/uuid", `uuidgen`.chomp)
 
 for i in 1..num
 	dir = "cfg#{i}"
@@ -18,7 +22,7 @@ for i in 1..num
 	address = "172.25.2.#{i}"
 
 	mycnf = File.read("my.cnf")
-	mycnf.gsub!("{{ uuid }}", File.read("#{dir}/uuid"))
+	mycnf.gsub!("{{ uuid }}", File.read("#{globaldir}/uuid"))
 	mycnf.gsub!("{{ ip_whitelist }}", (1..num).to_a.map{|x|"172.25.2.#{x}"}.join(","))
 	mycnf.gsub!("{{ group_seeds }}", (1..num).to_a.map{|x|"172.25.2.#{x}:#{repl_port}"}.join(","))
 	mycnf.gsub!("{{ server_id }}", "#{i}")
@@ -26,9 +30,28 @@ for i in 1..num
 	mycnf.gsub!("{{ repl_port }}", "#{repl_port}")
 	File.write("#{dir}/my.cnf", mycnf)
 
-	pwd = `pwd`.chomp
-	`docker run -ti --user root -v #{pwd}/cfg#{i}/data1:/var/lib/mysql #{image} chown -R mysql:mysql /var/lib/mysql`
-	`docker run -ti --user mysql -v #{pwd}/cfg#{i}/data1:/var/lib/mysql #{image} mysql_ssl_rsa_setup --uid=mysql --datadir=/var/lib/mysql`
+	autocnf = File.read("auto.cnf")
+	autocnf.gsub!("{{ server_uuid }}", File.read("#{dir}/uuid"))
+	File.write("#{dir}/auto.cnf", autocnf)
+
+	certdir = "cfg#{i}/certs"
+	subj =  "/C=JP/ST=Tokyo/L=Chiyoda/O=Bunny/CN=astrobunny.net" 
+	FileUtils.mkdir_p certdir
+	if i == 1
+		puts "Generating CA key and root cert"
+		`openssl genrsa 2048 > #{globaldir}/ca-key.pem`
+		`openssl req -new -x509 -nodes -subj "#{subj}" -days 3600 -key #{globaldir}/ca-key.pem -out #{globaldir}/ca.pem`
+	end
+
+	puts "Generating Server #{i} key and cert"
+	`openssl req -newkey rsa:2048 -days 3600 -nodes -subj "#{subj}" -keyout #{certdir}/server-key.pem -out #{certdir}/server-req.pem`
+	`openssl rsa -in #{certdir}/server-key.pem -out #{certdir}/server-key.pem`
+	`openssl x509 -req -in #{certdir}/server-req.pem -days 3600 -CA #{globaldir}/ca.pem -CAkey #{globaldir}/ca-key.pem -set_serial 01 -out #{certdir}/server-cert.pem`
+
+	puts "Generating Client #{i} key and cert"
+	`openssl req -newkey rsa:2048 -days 3600 -nodes -subj "#{subj}" -keyout #{certdir}/client-key.pem -out #{certdir}/client-req.pem`
+	`openssl rsa -in #{certdir}/client-key.pem -out #{certdir}/client-key.pem`
+	`openssl x509 -req -in #{certdir}/client-req.pem -days 3600 -CA #{globaldir}/ca.pem -CAkey #{globaldir}/ca-key.pem -set_serial 01 -out #{certdir}/client-cert.pem`
 end
 
 `docker network create -d bridge --subnet 172.25.0.0/16 mysqlnet`
@@ -36,15 +59,17 @@ for i in 1..num
 	pwd = `pwd`.chomp
 	p "#{pwd}/cfg#{i}/my.cnf"
 
+	ca = [
+		"ca.pem"
+	].map {|x| "-v #{pwd}/#{globaldir}/#{x}:/var/lib/mysql/#{x}"}.join(" ")
 	ssl = [
 		"client-key.pem",
 		"client-cert.pem",
 		"server-key.pem",
-		"server-cert.pem",
-		"private_key.pem",
-		"public_key.pem"
-	].map {|x| "-v #{pwd}/cfg#{i}/data1/#{x}:/var/lib/mysql/#{x}"}.join(" ")
-	`docker run -d --network=mysqlnet -p 3306 -p 33061 -e UID=#{ENV['UID']} --ip=172.25.2.#{i} --name mysql#{i} -v #{pwd}/cfg#{i}/my.cnf:/etc/mysql/my.cnf #{ssl} #{image}`
+		"server-cert.pem"
+	].map {|x| "-v #{pwd}/#{certdir}/#{x}:/var/lib/mysql/#{x}"}.join(" ")
+
+	`docker run -d --network=mysqlnet -p 3306 -p 33061 -e UID=#{ENV['UID']} --ip=172.25.2.#{i} --name mysql#{i} -v #{pwd}/cfg#{i}/my.cnf:/etc/mysql/my.cnf -v #{pwd}/cfg#{i}/auto.cnf:/var/lib/mysql/auto.cnf #{ca} #{ssl} #{image}`
 end
 
 for i in 1..num
@@ -61,7 +86,7 @@ for i in 1..num
 	]
 
 	queries.each do |x|
-		puts `docker exec --user root mysql1 mysql --socket=/var/run/mysqld/mysqld.sock -u root -e #{x.inspect}`
+		puts `docker exec --user root mysql#{i} mysql --socket=/var/run/mysqld/mysqld.sock -u root -e #{x.inspect}`
 	end
 end
 
@@ -74,7 +99,7 @@ for i in 1..1
 	]
 
 	queries.each do |x|
-		puts `docker exec --user root mysql1 mysql --socket=/var/run/mysqld/mysqld.sock -u root -e #{x.inspect}`
+		puts `docker exec --user root mysql#{i} mysql --socket=/var/run/mysqld/mysqld.sock -u root -e #{x.inspect}`
 	end
 end
 
@@ -85,6 +110,6 @@ for i in 2..num
 	]
 
 	queries.each do |x|
-		puts `docker exec --user root mysql1 mysql --socket=/var/run/mysqld/mysqld.sock -u root -e #{x.inspect}`
+		puts `docker exec --user root mysql#{i} mysql --socket=/var/run/mysqld/mysqld.sock -u root -e #{x.inspect}`
 	end
 end
