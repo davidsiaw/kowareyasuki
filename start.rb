@@ -74,11 +74,13 @@ end
 
 for i in 1..num
 	queries = [
-		"SET SQL_LOG_BIN=0;",
-		"CREATE USER 'repl'@'%' IDENTIFIED BY 'replpassword' REQUIRE SSL;",
-		"GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';",
-		"FLUSH PRIVILEGES;",
-		"SET SQL_LOG_BIN=1;",
+		<<-SQL,
+			SET SQL_LOG_BIN=0;
+			CREATE USER 'repl'@'%' IDENTIFIED BY 'replpassword' REQUIRE SSL;
+			GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';
+			FLUSH PRIVILEGES;
+			SET SQL_LOG_BIN=1;
+		SQL
 		"CHANGE MASTER TO MASTER_USER='repl', MASTER_PASSWORD='replpassword' FOR CHANNEL 'group_replication_recovery';",
 		"INSTALL PLUGIN group_replication SONAME 'group_replication.so';",
 		"SHOW PLUGINS;"
@@ -86,7 +88,7 @@ for i in 1..num
 	]
 
 	queries.each do |x|
-		puts `docker exec --user root mysql#{i} mysql --socket=/var/run/mysqld/mysqld.sock -u root -e #{x.inspect}`
+		puts `docker exec -ti --user root mysql#{i} mysql --socket=/var/run/mysqld/mysqld.sock -u root -e #{x.inspect}`
 	end
 end
 
