@@ -1,5 +1,4 @@
-
-num = 3
+require "./num"
 
 for i in 1..num
 	`docker kill mysql#{i}`

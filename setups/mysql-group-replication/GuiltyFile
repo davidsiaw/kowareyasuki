@@ -1,0 +1,48 @@
+subj =  "/C=JP/ST=Tokyo/L=Chiyoda/O=Bunny/CN=astrobunny.net" 
+`openssl genrsa 2048 > ca-key.pem`
+`openssl req -new -x509 -nodes -subj "#{subj}" -days 3600 -key ca-key.pem -out ca.pem`
+
+ca_key_pem = File.read("ca-key.pem")
+ca_pem = File.read("ca.pem")
+
+server type: :master do |server_number, server_ip, other_servers|
+  image :ubuntu_mysql
+
+  uuid = `uuidgen`.chomp
+  whitelist = other_servers[:master].map{|k,v| v[:server_ip]}.join(",")
+  group_seeds = other_servers[:master].map{|k,v| "#{v[:server_ip]}:33061"}.join(",")
+  repl_port = 33061
+
+  File.write("ca.pem", ca_pem)
+  File.write("ca-key.pem", ca_key_pem)
+
+  puts "Generating Server #{server_number} key and cert"
+  `openssl req -newkey rsa:2048 -days 3600 -nodes -subj "#{subj}" -keyout server-key.pem -out server-req.pem`
+  `openssl rsa -in server-key.pem -out server-key.pem`
+  `openssl x509 -req -in server-req.pem -days 3600 -CA ca.pem -CAkey ca-key.pem -set_serial 01 -out server-cert.pem`
+
+  puts "Generating Client #{server_number} key and cert"
+  `openssl req -newkey rsa:2048 -days 3600 -nodes -subj "#{subj}" -keyout client-key.pem -out client-req.pem`
+  `openssl rsa -in client-key.pem -out client-key.pem`
+  `openssl x509 -req -in client-req.pem -days 3600 -CA ca.pem -CAkey ca-key.pem -set_serial 01 -out client-cert.pem`
+
+  file named: "/etc/mysql/my.cnf",
+       template: "my.cnf",
+       vars: {
+         uuid: uuid,
+         ip_whitelist: whitelist,
+         group_seeds: group_seeds,
+         server_id: server_number,
+         bind_address: server_ip,
+         repl_port: repl_port 
+       }
+
+  file named: "/var/lib/mysql/auto.cnf",
+       template: "auto.cnf",
+       vars: {
+        uuid: uuid
+       }
+
+  file named: "/var/lib/mysql/ca.pem", contents: ca_pem
+
+end

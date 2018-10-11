@@ -1,7 +1,7 @@
 require "yaml"
 require "fileutils"
+require "./num"
 
-num = 3
 repl_port = 33061
 image = "davidsiaw/mysqlr"
 globaldir = "global"
@@ -115,3 +115,12 @@ for i in 2..num
 		puts `docker exec --user root mysql#{i} mysql --socket=/var/run/mysqld/mysqld.sock -u root -e #{x.inspect}`
 	end
 end
+
+puts "Starting continuous communication"
+
+def ex(server, command)
+	puts `docker exec --user root mysql#{server} mysql --socket=/var/run/mysqld/mysqld.sock -u root -e #{command.inspect}`
+end
+
+ex(1, "CREATE DATABASE mobs")
+ex(1, "CREATE TABLE mobs.porings(id binary(36) not null primary key, name varchar(255), age int)")
